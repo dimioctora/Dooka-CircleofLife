@@ -11,7 +11,7 @@ import {
   Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Save, CloudCheck, CloudUpload, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, Cloud, Check, AlertCircle, Loader2, CloudOff } from 'lucide-react';
 import PersonNode from './PersonNode';
 import UnionNode from './UnionNode';
 
@@ -342,19 +342,21 @@ const FamilyTree = () => {
         )}
         {saveStatus === 'saved' && (
           <>
-            <CloudCheck size={16} className="text-emerald-400" />
+            <Cloud size={16} className="text-emerald-400" />
+            <Check size={10} className="text-emerald-400 -ml-2 mb-2" />
             <span>Perubahan Tersimpan</span>
           </>
         )}
         {saveStatus === 'error' && (
           <>
-            <AlertCircle size={16} className="text-rose-400" />
+            <CloudOff size={16} className="text-rose-400" />
             <span>Gagal Menyimpan</span>
           </>
         )}
         {saveStatus === 'idle' && (
           <>
-            <CloudCheck size={16} className="text-slate-500" />
+            <Cloud size={16} className="text-slate-500" />
+            <Check size={10} className="text-slate-500 -ml-2 mb-2" />
             <span>Tersimpan di Cloud</span>
           </>
         )}
