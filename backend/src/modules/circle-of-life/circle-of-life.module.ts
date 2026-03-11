@@ -86,6 +86,7 @@ export class CircleOfLifeService {
   async saveGraph(payload: { nodes: any[], edges: any[] }): Promise<void> {
     // 1. Process Nodes (People and Unions)
     for (const node of payload.nodes) {
+      console.log(`Processing node type ${node.type}, id ${node.id}`);
       if (node.type === 'person') {
         const query = `
           MERGE (p:Person {person_id: $person_id})
@@ -104,14 +105,20 @@ export class CircleOfLifeService {
           x: node.position.x,
           y: node.position.y
         };
-        await this.graphService.runQuery(query, { person_id: node.id, props });
+        await this.graphService.runQuery(query, { person_id: String(node.id), props });
       } else if (node.type === 'union') {
         const query = `
           MERGE (u:Union {union_id: $union_id}) 
           SET u.x = $x, u.y = $y
           RETURN u
         `;
-        await this.graphService.runQuery(query, { union_id: node.id, x: node.position.x, y: node.position.y });
+        const params = { 
+          union_id: String(node.id), 
+          x: Number(node.position.x), 
+          y: Number(node.position.y) 
+        };
+        console.log('Union Params:', params);
+        await this.graphService.runQuery(query, params);
       }
     }
 
