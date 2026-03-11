@@ -58,7 +58,8 @@ const FamilyTree = () => {
       try {
         console.log('Fetching graph from server...');
         // For now using person_id '1' as root. In production this would be dynamic.
-        const response = await fetch('http://localhost:3000/circle/tree/1');
+        const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
+        const response = await fetch(`${apiUrl}/circle/tree/1`);
         const data = await response.json();
         
         if (data.nodes && data.nodes.length > 0) {
@@ -293,8 +294,8 @@ const FamilyTree = () => {
   const saveChanges = async () => {
     try {
       console.log('Pushing graph to Neo4j...');
-      
-      const response = await fetch('http://localhost:3000/circle/tree/save', {
+      const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
+      const response = await fetch(`${apiUrl}/circle/tree/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes, edges })
