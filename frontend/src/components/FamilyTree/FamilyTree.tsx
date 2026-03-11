@@ -64,7 +64,6 @@ const FamilyTree = () => {
 
     setFormData({
       name: data.name || '',
-      email: data.email || '',
       birthDate: toIndoDate(data.birth_date),
       deathDate: toIndoDate(data.death_date),
       gender: data.gender || 'male',
@@ -132,10 +131,8 @@ const FamilyTree = () => {
     fetchTree();
   }, [setNodes, setEdges, injectHandlers]);
   
-  // New Form State
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     birthDate: '',
     deathDate: '',
     gender: 'male',
@@ -190,7 +187,6 @@ const FamilyTree = () => {
               data: {
                 ...node.data,
                 name: formData.name,
-                email: formData.email,
                 gender: formData.gender,
                 birth_date: isoBirth,
                 birth_year: bYear,
@@ -212,7 +208,6 @@ const FamilyTree = () => {
         position: { x: Math.random() * 400, y: Math.random() * 400 },
         data: { 
           name: formData.name, 
-          email: formData.email,
           birth_date: isoBirth,
           birth_year: bYear, 
           death_date: formData.isDeceased ? isoDeath : null,
@@ -226,7 +221,7 @@ const FamilyTree = () => {
       setNodes((nds) => nds.concat(newNode as any));
     }
 
-    setFormData({ name: '', email: '', birthDate: '', deathDate: '', gender: 'male', isDeceased: false, visibility: 'private' });
+    setFormData({ name: '', birthDate: '', deathDate: '', gender: 'male', isDeceased: false, visibility: 'private' });
     setEditingNodeId(null);
     setShowAddForm(false);
   }, [formData, nodes, setNodes, editingNodeId]);
@@ -344,17 +339,6 @@ const FamilyTree = () => {
                 />
               </div>
 
-              {!formData.isDeceased && (
-                <div className="input-group animate-fade-in">
-                  <label>Email (Untuk Invite)</label>
-                  <input 
-                    type="email" 
-                    placeholder="nama@email.com" 
-                    value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  />
-                </div>
-              )}
 
               <div className="input-row">
                 <div className="input-group">

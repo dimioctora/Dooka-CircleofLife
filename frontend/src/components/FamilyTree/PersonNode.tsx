@@ -71,15 +71,6 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
             <Edit2 size={9} />
           </button>
         )}
-        {!isMemorial && data.email && (
-          <button 
-            className="invite-node-btn"
-            onClick={handleInvite}
-            title="Kirim Undangan Email"
-          >
-            <Mail size={9} />
-          </button>
-        )}
         <button 
           className="delete-node-btn"
           onClick={handleDelete}
