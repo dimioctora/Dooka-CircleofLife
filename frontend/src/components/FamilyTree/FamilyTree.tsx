@@ -11,7 +11,7 @@ import {
   Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Save } from 'lucide-react';
+import { Save, CloudCheck, CloudUpload, AlertCircle, Loader2 } from 'lucide-react';
 import PersonNode from './PersonNode';
 import UnionNode from './UnionNode';
 
@@ -51,6 +51,8 @@ const FamilyTree = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
 
   const handleEditNode = useCallback((id: string, data: any) => {
     const toIndoDate = (iso: string) => {
@@ -122,10 +124,12 @@ const FamilyTree = () => {
           setNodes(injectHandlers(initialNodes));
           setEdges(initialEdges as any);
         }
+        setIsFirstLoad(false); 
       } catch (error) {
         console.error('Error fetching tree:', error);
         setNodes(injectHandlers(initialNodes));
         setEdges(initialEdges as any);
+        setIsFirstLoad(false);
       }
     };
     fetchTree();
@@ -275,9 +279,12 @@ const FamilyTree = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, [addNewUnion]);
 
-  const saveChanges = async () => {
+  const saveChanges = useCallback(async () => {
+    if (isFirstLoad) return;
+    
+    setSaveStatus('saving');
     try {
-      console.log('Pushing graph to Neo4j...');
+      console.log('Autosaving graph to server...');
       const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
       const response = await fetch(`${apiUrl}/circle/tree/save`, {
         method: 'POST',
@@ -287,13 +294,26 @@ const FamilyTree = () => {
 
       if (!response.ok) throw new Error('Network response was not ok');
 
-      alert('✅ Silsilah berhasil disimpan secara permanen ke database Circle of Life.');
+      setSaveStatus('saved');
+      // Reset to idle after 3 seconds
+      setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 3000);
       
     } catch (error) {
       console.error('Error saving graph:', error);
-      alert('Gagal menyimpan ke database. Pastikan server Backend (NestJS) aktif.');
+      setSaveStatus('error');
     }
-  };
+  }, [nodes, edges, isFirstLoad]);
+
+  // AUTOSAVE DEBOUNCE
+  useEffect(() => {
+    if (isFirstLoad) return;
+    
+    const delayDebounceFn = setTimeout(() => {
+      saveChanges();
+    }, 2000); // Save 2 seconds after last change
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [nodes, edges, saveChanges, isFirstLoad]);
 
   return (
     <div className="tree-container" style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -312,11 +332,33 @@ const FamilyTree = () => {
         <Background color="#1e293b" gap={20} />
       </ReactFlow>
 
-      {/* FLOAT SAVE BUTTON */}
-      <button className="global-save-btn" onClick={saveChanges}>
-        <Save size={20} />
-        <span>Simpan Perubahan</span>
-      </button>
+      {/* AUTOSAVE STATUS INDICATOR */}
+      <div className={`save-status-indicator ${saveStatus}`}>
+        {saveStatus === 'saving' && (
+          <>
+            <Loader2 size={16} className="animate-spin text-cyan-400" />
+            <span>Sedang Menyimpan...</span>
+          </>
+        )}
+        {saveStatus === 'saved' && (
+          <>
+            <CloudCheck size={16} className="text-emerald-400" />
+            <span>Perubahan Tersimpan</span>
+          </>
+        )}
+        {saveStatus === 'error' && (
+          <>
+            <AlertCircle size={16} className="text-rose-400" />
+            <span>Gagal Menyimpan</span>
+          </>
+        )}
+        {saveStatus === 'idle' && (
+          <>
+            <CloudCheck size={16} className="text-slate-500" />
+            <span>Tersimpan di Cloud</span>
+          </>
+        )}
+      </div>
       
       {/* ADD FORM OVERLAY */}
       {showAddForm && (
@@ -619,6 +661,38 @@ const FamilyTree = () => {
         .react-flow__minimap-node {
           fill: #1e293b !important;
           stroke: rgba(255, 255, 255, 0.1) !important;
+        }
+        .save-status-indicator {
+          position: absolute;
+          bottom: 24px;
+          right: 24px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: rgba(15, 23, 42, 0.9);
+          backdrop-filter: blur(12px);
+          padding: 10px 18px;
+          border-radius: 100px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          font-size: 0.85rem;
+          color: white;
+          z-index: 100;
+          box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .save-status-indicator.saving {
+          border-color: rgba(34, 211, 238, 0.3);
+          transform: translateY(-2px);
+        }
+        .save-status-indicator.saved {
+          border-color: rgba(52, 211, 153, 0.3);
+        }
+        .animate-spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>
