@@ -6,21 +6,21 @@ import { PersonService, PersonModule } from '../person/person.module';
 export class CircleOfLifeService {
   constructor(private readonly graphService: GraphService) {}
 
+  private normalizeNumber(val: any): number {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'number') return val;
+    if (typeof val.toInt === 'function') return val.toInt();
+    if (typeof val.low !== 'undefined') {
+      // Handle Neo4j Integer type
+      return (val.high || 0) * 4294967296 + val.low;
+    }
+    return parseFloat(val.toString()) || 0;
+  }
+
   async getTree(person_id: string, depth: number = 3): Promise<any> {
-    const query = `
-      MATCH (p:Person {person_id: $person_id})
-      CALL apoc.path.subgraphAll(p, {
-        relationshipFilter: 'PARENT>|CHILD>|SPOUSE',
-        minLevel: 0,
-        maxLevel: $depth
-      })
-      YIELD nodes, relationships
-      RETURN nodes, relationships
-    `;
-    // If APOC is not installed, use standard Cypher
     const fallbackQuery = `
       MATCH (p:Person {person_id: $person_id})
-      OPTIONAL MATCH path = (p)-[:PARENT|CHILD|SPOUSE*0..${depth}]-(relative:Person)
+      OPTIONAL MATCH path = (p)-[:PARENT|CHILD|SPOUSE*0..${depth}]-(relative)
       RETURN nodes(path) as nodes, relationships(path) as rels
     `;
     
@@ -33,12 +33,16 @@ export class CircleOfLifeService {
     const nodesMap = new Map();
     results.forEach(row => {
       row.nodes?.forEach(n => {
-        if (!nodesMap.has(n.properties.person_id)) {
-          nodesMap.set(n.properties.person_id, true);
+        const nodeId = n.properties.person_id || n.properties.union_id;
+        if (nodeId && !nodesMap.has(nodeId)) {
+          nodesMap.set(nodeId, true);
           nodesReturn.push({
-            id: n.properties.person_id,
+            id: String(nodeId),
             type: n.labels.includes('Union') ? 'union' : 'person',
-            position: { x: n.properties.x || 0, y: n.properties.y || 0 },
+            position: { 
+              x: this.normalizeNumber(n.properties.x), 
+              y: this.normalizeNumber(n.properties.y) 
+            },
             data: { ...n.properties }
           });
         }
@@ -47,12 +51,25 @@ export class CircleOfLifeService {
         const edgeId = r.properties.id || `${r.startNodeElementId}-${r.endNodeElementId}`;
         if (!edgesSet.has(edgeId)) {
           edgesSet.add(edgeId);
-          edgesReturn.push({
-            id: edgeId,
-            source: r.properties.start_id || row.nodes.find(n => n.elementId === r.startNodeElementId)?.properties.person_id || r.startNodeElementId,
-            target: r.properties.end_id || row.nodes.find(n => n.elementId === r.endNodeElementId)?.properties.person_id || r.endNodeElementId,
-            label: r.type === 'PARENT' ? 'Parent' : r.type === 'SPOUSE' ? 'Partner' : ''
-          });
+          
+          // Find source and target IDs from the nodes in the same row or globally
+          const sourceNode = row.nodes.find(n => n.elementId === r.startNodeElementId);
+          const targetNode = row.nodes.find(n => n.elementId === r.endNodeElementId);
+          
+          const sourceId = sourceNode?.properties.person_id || sourceNode?.properties.union_id;
+          const targetId = targetNode?.properties.person_id || targetNode?.properties.union_id;
+
+          if (sourceId && targetId) {
+            edgesReturn.push({
+              id: String(edgeId),
+              source: String(sourceId),
+              target: String(targetId),
+              label: r.type === 'PARENT' ? 'Parent' : r.type === 'SPOUSE' ? 'Partner' : '',
+              sourceHandle: r.properties.sourceHandle || null,
+              targetHandle: r.properties.targetHandle || null,
+              type: r.properties.type || 'smoothstep'
+            });
+          }
         }
       });
     });
@@ -85,9 +102,13 @@ export class CircleOfLifeService {
 
   async saveGraph(payload: { nodes: any[], edges: any[] }): Promise<void> {
     console.log('Incoming Payload:', JSON.stringify(payload));
+    
+    if (!payload.nodes || !Array.isArray(payload.nodes)) return;
+
+    const nodeIds = payload.nodes.map(n => String(n.id));
+
     // 1. Process Nodes (People and Unions)
     for (const node of payload.nodes) {
-      console.log(`Processing node type ${node.type}, id ${node.id}`);
       if (node.type === 'person') {
         const query = `
           MERGE (p:Person {person_id: $person_id})
@@ -103,8 +124,8 @@ export class CircleOfLifeService {
           visibility: node.data.visibility || 'private',
           photo: node.data.photo || '',
           isLinked: node.data.isLinked || false,
-          x: node.position.x,
-          y: node.position.y
+          x: this.normalizeNumber(node.position.x),
+          y: this.normalizeNumber(node.position.y)
         };
         await this.graphService.runQuery(query, { person_id: String(node.id), props });
       } else if (node.type === 'union') {
@@ -115,28 +136,50 @@ export class CircleOfLifeService {
         `;
         const params = { 
           union_id: String(node.id), 
-          x: Number(node.position.x), 
-          y: Number(node.position.y) 
+          x: this.normalizeNumber(node.position.x), 
+          y: this.normalizeNumber(node.position.y) 
         };
-        console.log('Union Params:', params);
         await this.graphService.runQuery(query, params);
       }
     }
 
-    // 2. Process Relationships (Edges)
-    for (const edge of payload.edges) {
-      const label = edge.label || 'Parent';
-      const type = label === 'Parent' ? 'PARENT' : label === 'Partner' ? 'SPOUSE' : 'RELATION';
-      
-      const query = `
-        MATCH (a), (b)
-        WHERE (a.person_id = $source OR a.union_id = $source)
-          AND (b.person_id = $target OR b.union_id = $target)
-        MERGE (a)-[r:${type}]->(b)
-        SET r.id = $id
-        RETURN r
+    // 2. Clear old relationships between these nodes to prevent duplicates/ghost lines
+    if (nodeIds.length > 0) {
+      const clearQuery = `
+        MATCH (a)-[r:PARENT|SPOUSE|RELATION]->(b)
+        WHERE (a.person_id IN $nodeIds OR a.union_id IN $nodeIds)
+          AND (b.person_id IN $nodeIds OR b.union_id IN $nodeIds)
+        DELETE r
       `;
-      await this.graphService.runQuery(query, { id: edge.id, source: edge.source, target: edge.target });
+      await this.graphService.runQuery(clearQuery, { nodeIds });
+    }
+
+    // 3. Process Relationships (Edges)
+    if (payload.edges && Array.isArray(payload.edges)) {
+      for (const edge of payload.edges) {
+        const label = edge.label || 'Parent';
+        const type = label === 'Parent' ? 'PARENT' : label === 'Partner' ? 'SPOUSE' : 'RELATION';
+        
+        const query = `
+          MATCH (a), (b)
+          WHERE (a.person_id = $source OR a.union_id = $source)
+            AND (b.person_id = $target OR b.union_id = $target)
+          MERGE (a)-[r:${type}]->(b)
+          SET r.id = $id,
+              r.sourceHandle = $sourceHandle,
+              r.targetHandle = $targetHandle,
+              r.type = $edgeType
+          RETURN r
+        `;
+        await this.graphService.runQuery(query, { 
+          id: String(edge.id), 
+          source: String(edge.source), 
+          target: String(edge.target),
+          sourceHandle: edge.sourceHandle || '',
+          targetHandle: edge.targetHandle || '',
+          edgeType: edge.type || 'smoothstep'
+        });
+      }
     }
   }
 
@@ -145,19 +188,10 @@ export class CircleOfLifeService {
     const relCount = await this.graphService.runQuery(`MATCH ()-[r]->() RETURN count(r) as total`);
     const personCount = await this.graphService.runQuery(`MATCH (n:Person) RETURN count(n) as total`);
     
-    // Helper to safely convert Neo4j types to JS numbers
-    const normalize = (val: any) => {
-      if (val === null || val === undefined) return 0;
-      if (typeof val === 'number') return val;
-      if (typeof val.toInt === 'function') return val.toInt();
-      if (typeof val.low !== 'undefined') return val.low;
-      return parseInt(val.toString()) || 0;
-    };
-
     return {
-      total_nodes: normalize(nodeCount[0]?.total),
-      total_relationships: normalize(relCount[0]?.total),
-      total_persons: normalize(personCount[0]?.total),
+      total_nodes: this.normalizeNumber(nodeCount[0]?.total),
+      total_relationships: this.normalizeNumber(relCount[0]?.total),
+      total_persons: this.normalizeNumber(personCount[0]?.total),
       status: 'Online'
     };
   }
