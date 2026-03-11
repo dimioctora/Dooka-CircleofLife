@@ -7,7 +7,7 @@ const UnionNode = ({ id }: { id: string }) => {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm("Remove this partnership point?")) {
+    if (window.confirm("Remove this relationship point?")) {
       deleteElements({ nodes: [{ id }] });
     }
   };
