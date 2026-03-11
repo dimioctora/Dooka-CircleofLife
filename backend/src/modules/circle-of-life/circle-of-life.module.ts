@@ -84,6 +84,7 @@ export class CircleOfLifeService {
   }
 
   async saveGraph(payload: { nodes: any[], edges: any[] }): Promise<void> {
+    console.log('Incoming Payload:', JSON.stringify(payload));
     // 1. Process Nodes (People and Unions)
     for (const node of payload.nodes) {
       console.log(`Processing node type ${node.type}, id ${node.id}`);
