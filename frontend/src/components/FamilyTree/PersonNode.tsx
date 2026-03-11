@@ -108,7 +108,7 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
           border-radius: 16px;
           background: rgba(15, 23, 42, 0.95);
           border: 1px solid #30363d;
-          width: 200px;
+          width: 240px;
           box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           color: #e6edf3;
@@ -189,6 +189,7 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
         .profile-photo {
           width: 48px;
           height: 48px;
+          flex-shrink: 0;
           border-radius: 12px;
           background: #30363d;
           display: flex;
@@ -208,9 +209,9 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
           border-radius: 50% 0 0 0;
           display: flex;
         }
-
         .node-info {
           flex: 1;
+          min-width: 0;
         }
 
         .node-name {
