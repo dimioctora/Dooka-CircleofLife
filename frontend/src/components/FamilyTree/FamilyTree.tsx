@@ -52,47 +52,85 @@ const FamilyTree = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
+  const handleEditNode = useCallback((id: string, data: any) => {
+    const toIndoDate = (iso: string) => {
+      if (!iso) return '';
+      const parts = iso.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]} / ${parts[1]} / ${parts[0]}`;
+      }
+      return iso;
+    };
+
+    setFormData({
+      name: data.name || '',
+      email: data.email || '',
+      birthDate: toIndoDate(data.birth_date),
+      deathDate: toIndoDate(data.death_date),
+      gender: data.gender || 'male',
+      isDeceased: !!data.death_date || !!data.death_year,
+      visibility: data.visibility || 'private'
+    });
+    setEditingNodeId(id);
+    setShowAddForm(true);
+  }, []);
+
+  const handleConnectNode = useCallback((id: string, name: string) => {
+    setNodes((nds) => 
+      nds.map(node => {
+        if (node.id === id) {
+          return { ...node, data: { ...node.data, isConnecting: true } };
+        }
+        return node;
+      }) as any
+    );
+
+    window.parent.postMessage({
+      type: 'OPEN_PROFILE_SELECTOR',
+      node_id: id,
+      node_name: name
+    }, '*');
+  }, [setNodes]);
+
+  // Helper to inject handlers into nodes
+  const injectHandlers = useCallback((nds: any[]) => nds.map((node: any) => {
+    if (node.type === 'person') {
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          onEdit: handleEditNode,
+          onConnect: handleConnectNode
+        }
+      };
+    }
+    return node;
+  }), [handleEditNode, handleConnectNode]);
+
   // Fetch graph on load
   useEffect(() => {
     const fetchTree = async () => {
       try {
         console.log('Fetching graph from server...');
-        // For now using person_id '1' as root. In production this would be dynamic.
         const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
         const response = await fetch(`${apiUrl}/circle/tree/1`);
         const data = await response.json();
         
         if (data.nodes && data.nodes.length > 0) {
-          // Inject handlers before setting nodes
-          const nodesWithHandlers = data.nodes.map((node: any) => {
-            if (node.type === 'person') {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  onEdit: handleEditNode,
-                  onConnect: handleConnectNode
-                }
-              };
-            }
-            return node;
-          });
-          setNodes(nodesWithHandlers);
+          setNodes(injectHandlers(data.nodes));
           setEdges(data.edges);
         } else {
-          // If no data, use the default starting point
-          setNodes(initialNodes as any);
+          setNodes(injectHandlers(initialNodes));
           setEdges(initialEdges as any);
         }
       } catch (error) {
         console.error('Error fetching tree:', error);
-        // Fallback to local
-        setNodes(initialNodes as any);
+        setNodes(injectHandlers(initialNodes));
         setEdges(initialEdges as any);
       }
     };
     fetchTree();
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, injectHandlers]);
   
   // New Form State
   const [formData, setFormData] = useState({
@@ -192,66 +230,6 @@ const FamilyTree = () => {
     setEditingNodeId(null);
     setShowAddForm(false);
   }, [formData, nodes, setNodes, editingNodeId]);
-
-  // Handle Edit Trigger from Node
-  const handleEditNode = useCallback((id: string, data: any) => {
-    // Convert dates back to Indo format for the form
-    const toIndoDate = (iso: string) => {
-      if (!iso) return '';
-      const [y, m, d] = iso.split('-');
-      return `${d} / ${m} / ${y}`;
-    };
-
-    setFormData({
-      name: data.name || '',
-      email: data.email || '',
-      birthDate: toIndoDate(data.birth_date),
-      deathDate: toIndoDate(data.death_date),
-      gender: data.gender || 'male',
-      isDeceased: !!data.death_date || !!data.death_year,
-      visibility: data.visibility || 'private'
-    });
-    setEditingNodeId(id);
-    setShowAddForm(true);
-  }, []);
-
-  const handleConnectNode = useCallback((id: string, name: string) => {
-    // 1. Update node state to show connecting pulse reactively
-    setNodes((nds) => 
-      nds.map(node => {
-        if (node.id === id) {
-          return { ...node, data: { ...node.data, isConnecting: true } };
-        }
-        return node;
-      }) as any
-    );
-
-    // 2. Notify parent system to open selector
-    window.parent.postMessage({
-      type: 'OPEN_PROFILE_SELECTOR',
-      node_id: id,
-      node_name: name
-    }, '*');
-  }, [setNodes]);
-
-  // Ensure initial nodes also have handlers
-  useEffect(() => {
-    setNodes((nds) => 
-      nds.map(node => {
-        if (node.type === 'person' && (!node.data.onEdit || !node.data.onConnect)) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              onEdit: handleEditNode,
-              onConnect: handleConnectNode
-            }
-          };
-        }
-        return node;
-      }) as any
-    );
-  }, [handleEditNode, handleConnectNode, setNodes]);
 
   const addNewUnion = useCallback(() => {
     const newNodeId = `union-${Date.now()}`;
