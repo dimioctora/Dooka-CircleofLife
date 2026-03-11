@@ -159,6 +159,11 @@ export class CircleOfLifeService {
 export class CircleOfLifeController {
   constructor(private readonly service: CircleOfLifeService) {}
 
+  @Get('stats')
+  async getStats() {
+    return this.service.getStats();
+  }
+
   @Get(':person_id')
   async getTree(@Param('person_id') person_id: string, @Query('depth') depth?: number) {
     return this.service.getTree(person_id, depth || 3);
@@ -172,11 +177,6 @@ export class CircleOfLifeController {
   @Get(':person_id/descendants')
   async getDescendants(@Param('person_id') person_id: string) {
     return this.service.findDescendants(person_id);
-  }
-
-  @Get('stats')
-  async getStats() {
-    return this.service.getStats();
   }
 
   @Post('save')
