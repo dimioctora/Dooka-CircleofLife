@@ -227,6 +227,13 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
           color: #8b949e;
           margin-top: 2px;
         }
+
+        .profile-photo img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
       `}</style>
     </div>
   );
