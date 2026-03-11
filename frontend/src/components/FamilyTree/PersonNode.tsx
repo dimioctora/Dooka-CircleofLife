@@ -115,8 +115,7 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
         .person-node {
           padding: 12px;
           border-radius: 16px;
-          background: rgba(22, 27, 34, 0.8);
-          backdrop-filter: blur(12px);
+          background: rgba(15, 23, 42, 0.95);
           border: 1px solid #30363d;
           width: 200px;
           box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
