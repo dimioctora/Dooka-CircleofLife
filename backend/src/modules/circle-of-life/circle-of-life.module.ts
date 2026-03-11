@@ -188,7 +188,7 @@ export class CircleOfLifeController {
   }
 
   @Post('save')
-  async saveTree(@Body() payload: { nodes: any[], edges: any[] }) {
+  async saveTree(@Body() payload: any) {
     return this.service.saveGraph(payload);
   }
 }
