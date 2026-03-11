@@ -63,7 +63,21 @@ const FamilyTree = () => {
         const data = await response.json();
         
         if (data.nodes && data.nodes.length > 0) {
-          setNodes(data.nodes);
+          // Inject handlers before setting nodes
+          const nodesWithHandlers = data.nodes.map((node: any) => {
+            if (node.type === 'person') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  onEdit: handleEditNode,
+                  onConnect: handleConnectNode
+                }
+              };
+            }
+            return node;
+          });
+          setNodes(nodesWithHandlers);
           setEdges(data.edges);
         } else {
           // If no data, use the default starting point
@@ -166,7 +180,9 @@ const FamilyTree = () => {
           death_date: formData.isDeceased ? isoDeath : null,
           death_year: dYear,
           gender: formData.gender,
-          visibility: formData.visibility
+          visibility: formData.visibility,
+          onEdit: handleEditNode,
+          onConnect: handleConnectNode
         },
       };
       setNodes((nds) => nds.concat(newNode as any));
@@ -218,24 +234,19 @@ const FamilyTree = () => {
     }, '*');
   }, [setNodes]);
 
-  // Update nodes to include edit and connect handlers
+  // Ensure initial nodes also have handlers
   useEffect(() => {
     setNodes((nds) => 
       nds.map(node => {
-        if (node.type === 'person') {
-          const updatedData = { ...node.data } as any;
-          let changed = false;
-          
-          if (!updatedData.onEdit) {
-            updatedData.onEdit = handleEditNode;
-            changed = true;
-          }
-          if (!updatedData.onConnect) {
-            updatedData.onConnect = handleConnectNode;
-            changed = true;
-          }
-          
-          return changed ? { ...node, data: updatedData } : node;
+        if (node.type === 'person' && (!node.data.onEdit || !node.data.onConnect)) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onEdit: handleEditNode,
+              onConnect: handleConnectNode
+            }
+          };
         }
         return node;
       }) as any
