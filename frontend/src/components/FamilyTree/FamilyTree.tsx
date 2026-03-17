@@ -7,8 +7,12 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
+  applyNodeChanges,
+  applyEdgeChanges,
   Connection,
   Edge,
+  NodeChange,
+  EdgeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Save, Cloud, Check, AlertCircle, Loader2, CloudOff } from 'lucide-react';
@@ -42,17 +46,31 @@ const initialNodes = [
 ];
 
 const initialEdges = [
-  { id: 'e1-2', source: '1', target: '2', label: 'Parent' },
-  { id: 'e1-3', source: '1', target: '3', label: 'Parent' },
+  { id: 'e1-2', source: '1', target: '2', label: 'Parent', sourceHandle: 'bottom-source', targetHandle: 'top-target' },
+  { id: 'e1-3', source: '1', target: '3', label: 'Parent', sourceHandle: 'bottom-source', targetHandle: 'top-target' },
 ];
 
 const FamilyTree = () => {
-  const [nodes, setNodes, onNodesChange] = useNodesState<any>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
+  const [nodes, setNodes] = useNodesState<any>([]);
+  const [edges, setEdges] = useEdgesState<any>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [personId, setPersonId] = useState('');
+
+  // GET PERSON ID FROM URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    const id = queryParams.get('person_id');
+    if (id) {
+      setPersonId(id);
+    } else {
+      console.warn('[CircleOfLife] No person_id found in URL');
+      setPersonId('1'); 
+    }
+  }, []);
 
   const handleEditNode = useCallback((id: string, data: any) => {
     const toIndoDate = (iso: string) => {
@@ -108,32 +126,87 @@ const FamilyTree = () => {
     return node;
   }), [handleEditNode, handleConnectNode]);
 
+  const onNodesChange = useCallback(
+    (changes: any) => {
+      setNodes((nds) => {
+        const nextNodes = applyNodeChanges(changes, nds);
+        return injectHandlers(nextNodes);
+      });
+      if (!isDataLoaded && personId) setIsDataLoaded(true);
+    },
+    [setNodes, isDataLoaded, personId, injectHandlers]
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: any) => {
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+      if (!isDataLoaded && personId) setIsDataLoaded(true);
+    },
+    [setEdges, isDataLoaded, personId]
+  );
+
   // Fetch graph on load
   useEffect(() => {
+    if (!personId) return; // Wait for personId to be extracted
+
     const fetchTree = async () => {
       try {
-        console.log('Fetching graph from server...');
-        const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
-        const response = await fetch(`${apiUrl}/circle/tree/1`);
+        console.log(`[CircleOfLife] Fetching graph for person_id ${personId} from server...`);
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const apiUrl = isLocal ? 'http://localhost:3000' : '/api-circle';
+        const response = await fetch(`${apiUrl}/circle/tree/${personId}`);
         const data = await response.json();
         
         if (data.nodes && data.nodes.length > 0) {
+          console.log(`[CircleOfLife] Successfully loaded ${data.nodes.length} nodes from server.`);
           setNodes(injectHandlers(data.nodes));
           setEdges(data.edges);
+          setIsDataLoaded(true); // SERVER DATA LOADED - AUTOSAVE ENABLED
         } else {
-          setNodes(injectHandlers(initialNodes));
-          setEdges(initialEdges as any);
+          console.log('[CircleOfLife] No data found on server, initializing template.');
+          // If no personal data found, initialize with template but using correct ID
+          const personalizedInitialNodes = initialNodes.map(n => {
+            if (n.id === '1') return { ...n, id: personId, data: { ...n.data, name: 'Nama Anda' } };
+            return { ...n, id: `rel-${personId}-${n.id}` };
+          });
+          
+          const personalizedInitialEdges = initialEdges.map(e => ({
+            ...e,
+            id: `e-${personId}-${e.id}`,
+            source: e.source === '1' ? personId : `rel-${personId}-${e.source}`,
+            target: e.target === '1' ? personId : `rel-${personId}-${e.target}`,
+            sourceHandle: e.sourceHandle || 'bottom-source',
+            targetHandle: e.targetHandle || 'top-target'
+          }));
+
+          setNodes(injectHandlers(personalizedInitialNodes));
+          setEdges(personalizedInitialEdges as any);
+          // setIsDataLoaded(true); // REMOVED: Prevent autosave for template
+          console.log('[CircleOfLife] Template initialized. Autosave will be enabled after first change.');
         }
         setIsFirstLoad(false); 
       } catch (error) {
-        console.error('Error fetching tree:', error);
-        setNodes(injectHandlers(initialNodes));
-        setEdges(initialEdges as any);
+        console.error('[CircleOfLife] Error fetching tree:', error);
+        
+        // Even on error, use a personalized template if we have personId
+        const personalizedInitialNodes = initialNodes.map(n => {
+          if (n.id === '1') return { ...n, id: personId };
+          return { ...n, id: `rel-${personId}-${n.id}` };
+        });
+        setNodes(injectHandlers(personalizedInitialNodes));
+        setEdges(initialEdges.map(e => ({
+          ...e,
+          id: `e-${personId}-${e.id}`,
+          source: e.source === '1' ? personId : `rel-${personId}-${e.source}`,
+          target: e.target === '1' ? personId : `rel-${personId}-${e.target}`
+        })) as any);
+        
+        // setIsDataLoaded(true); // REMOVED: Prevent autosave on error template
         setIsFirstLoad(false);
       }
     };
     fetchTree();
-  }, [setNodes, setEdges, injectHandlers]);
+  }, [setNodes, setEdges, injectHandlers, personId]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -145,8 +218,22 @@ const FamilyTree = () => {
   });
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params: Connection) => {
+      // Determine label based on source handle
+      let label = 'Parent';
+      if (params.sourceHandle === 'right-source' || params.sourceHandle === 'left-source') {
+        label = 'Partner';
+      }
+      
+      const newEdge = {
+        ...params,
+        id: `e-${personId}-${Date.now()}`,
+        label: label,
+        type: 'smoothstep'
+      };
+      setEdges((eds) => addEdge(newEdge, eds));
+    },
+    [setEdges, personId]
   );
 
   const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
@@ -205,7 +292,7 @@ const FamilyTree = () => {
       );
     } else {
       // CREATE NEW NODE
-      const newNodeId = `person-${Date.now()}`;
+      const newNodeId = `rel-${personId}-${Date.now()}`;
       const newNode = {
         id: newNodeId,
         type: 'person',
@@ -228,10 +315,10 @@ const FamilyTree = () => {
     setFormData({ name: '', birthDate: '', deathDate: '', gender: 'male', isDeceased: false, visibility: 'private' });
     setEditingNodeId(null);
     setShowAddForm(false);
-  }, [formData, nodes, setNodes, editingNodeId]);
+  }, [formData, nodes, setNodes, editingNodeId, personId, handleEditNode, handleConnectNode]);
 
   const addNewUnion = useCallback(() => {
-    const newNodeId = `union-${Date.now()}`;
+    const newNodeId = `union-${personId}-${Date.now()}`;
     const newNode = {
       id: newNodeId,
       type: 'union',
@@ -239,7 +326,8 @@ const FamilyTree = () => {
       data: {},
     };
     setNodes((nds) => nds.concat(newNode as any));
-  }, [nodes, setNodes]);
+    if (!isDataLoaded && personId) setIsDataLoaded(true);
+  }, [setNodes, personId, isDataLoaded]);
 
   // Listen for messages from parent window (Laravel Blade)
   useEffect(() => {
@@ -277,43 +365,48 @@ const FamilyTree = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [addNewUnion]);
+  }, [addNewUnion, setNodes]);
 
   const saveChanges = useCallback(async () => {
     if (isFirstLoad) return;
     
     setSaveStatus('saving');
     try {
-      console.log('Autosaving graph to server...');
-      const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/api-circle';
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiUrl = isLocal ? 'http://localhost:3000' : '/api-circle';
+      console.log('[CircleOfLife] Saving for personId:', personId, 'to URL:', apiUrl);
       const response = await fetch(`${apiUrl}/circle/tree/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, edges })
+        body: JSON.stringify({ person_id: personId, nodes, edges })
       });
 
-      if (!response.ok) throw new Error('Network response was not ok');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server responded with ${response.status}: ${errorText}`);
+      }
 
+      console.log('[CircleOfLife] Save successful');
       setSaveStatus('saved');
       // Reset to idle after 3 seconds
       setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 3000);
       
     } catch (error) {
-      console.error('Error saving graph:', error);
+      console.error('[CircleOfLife] Error saving graph:', error);
       setSaveStatus('error');
     }
-  }, [nodes, edges, isFirstLoad]);
+  }, [nodes, edges, isFirstLoad, personId]);
 
   // AUTOSAVE DEBOUNCE
   useEffect(() => {
-    if (isFirstLoad) return;
+    if (isFirstLoad || !isDataLoaded) return;
     
     const delayDebounceFn = setTimeout(() => {
       saveChanges();
     }, 2000); // Save 2 seconds after last change
 
     return () => clearTimeout(delayDebounceFn);
-  }, [nodes, edges, saveChanges, isFirstLoad]);
+  }, [nodes, edges, saveChanges, isFirstLoad, isDataLoaded]);
 
   return (
     <div className="tree-container" style={{ width: '100%', height: '100%', position: 'relative' }}>

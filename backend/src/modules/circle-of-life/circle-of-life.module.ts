@@ -16,7 +16,6 @@ export class CircleOfLifeService {
     }
     return parseFloat(val.toString()) || 0;
   }
-
   async getTree(person_id: string, depth: number = 3): Promise<any> {
     const fallbackQuery = `
       MATCH (p:Person {person_id: $person_id})
@@ -24,7 +23,9 @@ export class CircleOfLifeService {
       RETURN nodes(path) as nodes, relationships(path) as rels
     `;
     
+    console.log(`[CircleOfLifeService] getTree called for person_id: ${person_id}, depth: ${depth}`);
     const results = await this.graphService.runQuery(fallbackQuery, { person_id });
+    console.log(`[CircleOfLifeService] getTree query returned ${results.length} rows`);
     
     const nodesReturn: any[] = [];
     const edgesSet = new Set();
@@ -33,47 +34,58 @@ export class CircleOfLifeService {
     const nodesMap = new Map();
     results.forEach(row => {
       row.nodes?.forEach(n => {
-        const nodeId = n.properties.person_id || n.properties.union_id;
-        if (nodeId && !nodesMap.has(nodeId)) {
+        const rawId = n.properties.person_id || n.properties.union_id;
+        if (rawId === undefined || rawId === null) return;
+        
+        const nodeId = String(rawId); // Force string ID
+        if (!nodesMap.has(nodeId)) {
           nodesMap.set(nodeId, true);
-          nodesReturn.push({
-            id: String(nodeId),
+          const nodeData = {
+            id: nodeId,
             type: n.labels.includes('Union') ? 'union' : 'person',
             position: { 
               x: this.normalizeNumber(n.properties.x), 
               y: this.normalizeNumber(n.properties.y) 
             },
             data: { ...n.properties }
-          });
+          };
+          console.log(`[CircleOfLifeService] Extraction - Node Found: ID=${nodeData.id}, Type=${nodeData.type}`);
+          nodesReturn.push(nodeData);
         }
       });
+      
       row.rels?.forEach(r => {
-        const edgeId = r.properties.id || `${r.startNodeElementId}-${r.endNodeElementId}`;
-        if (!edgesSet.has(edgeId)) {
-          edgesSet.add(edgeId);
-          
-          // Find source and target IDs from the nodes in the same row or globally
-          const sourceNode = row.nodes.find(n => n.elementId === r.startNodeElementId);
-          const targetNode = row.nodes.find(n => n.elementId === r.endNodeElementId);
-          
-          const sourceId = sourceNode?.properties.person_id || sourceNode?.properties.union_id;
-          const targetId = targetNode?.properties.person_id || targetNode?.properties.union_id;
+        // Find source and target IDs from the nodes in the SAME row
+        const sourceNode = row.nodes.find(n => n.elementId === r.startNodeElementId);
+        const targetNode = row.nodes.find(n => n.elementId === r.endNodeElementId);
+        
+        const rawSourceId = sourceNode?.properties.person_id || sourceNode?.properties.union_id;
+        const rawTargetId = targetNode?.properties.person_id || targetNode?.properties.union_id;
 
-          if (sourceId && targetId) {
+        if (rawSourceId && rawTargetId) {
+          const sourceId = String(rawSourceId);
+          const targetId = String(rawTargetId);
+          const edgeId = r.properties.id || `${sourceId}-${targetId}`;
+          
+          if (!edgesSet.has(edgeId)) {
+            edgesSet.add(edgeId);
             edgesReturn.push({
-              id: String(edgeId),
-              source: String(sourceId),
-              target: String(targetId),
+              id: edgeId,
+              source: sourceId,
+              target: targetId,
               label: r.type === 'PARENT' ? 'Parent' : r.type === 'SPOUSE' ? 'Partner' : '',
               sourceHandle: r.properties.sourceHandle || null,
               targetHandle: r.properties.targetHandle || null,
               type: r.properties.type || 'smoothstep'
             });
           }
+        } else {
+          console.warn(`[CircleOfLifeService] Could not resolve source/target for relation: ${r.elementId}`);
         }
       });
     });
 
+    console.log(`[CircleOfLifeService] Returning ${nodesReturn.length} nodes and ${edgesReturn.length} edges`);
     return {
       nodes: nodesReturn,
       edges: edgesReturn
@@ -100,15 +112,46 @@ export class CircleOfLifeService {
     return results.map(r => r.descendant.properties);
   }
 
-  async saveGraph(payload: { nodes: any[], edges: any[] }): Promise<void> {
-    console.log('Incoming Payload:', JSON.stringify(payload));
+  async saveGraph(payload: { person_id: string, nodes: any[], edges: any[] }): Promise<void> {
+    const { person_id, nodes, edges } = payload;
+    console.log(`[CircleOfLifeService] saveGraph for person_id: ${person_id}`);
+    console.log('Incoming Payload Nodes:', nodes?.length || 0);
+    console.log('Incoming Payload Edges:', edges?.length || 0);
     
-    if (!payload.nodes || !Array.isArray(payload.nodes)) return;
+    if (!nodes || !Array.isArray(nodes) || !person_id) {
+      console.warn('[CircleOfLifeService] Invalid payload or missing person_id, skipping save.');
+      return;
+    }
 
-    const nodeIds = payload.nodes.map(n => String(n.id));
+    const payloadNodeIds = nodes.map(n => String(n.id));
 
-    // 1. Process Nodes (People and Unions)
-    for (const node of payload.nodes) {
+    // 1. SYNC/DELETE: Remove nodes that exist in DB but are NOT in payload
+    // We only delete nodes that "belong" to this person_id (roots, relatives, and unions)
+    const cleanupQuery = `
+      MATCH (n)
+      WHERE (
+        (n:Person AND (n.person_id = $pid OR n.person_id STARTS WITH $relPrefix))
+        OR 
+        (n:Union AND (n.union_id = $pid OR n.union_id STARTS WITH $unionPrefix))
+      )
+      AND (
+        (n:Person AND NOT n.person_id IN $payloadIds)
+        OR
+        (n:Union AND NOT n.union_id IN $payloadIds)
+      )
+      DETACH DELETE n
+    `;
+    
+    console.log(`[CircleOfLifeService] Cleaning up deleted nodes for ${person_id}...`);
+    await this.graphService.runQuery(cleanupQuery, { 
+      pid: String(person_id), 
+      relPrefix: `rel-${person_id}-`, 
+      unionPrefix: `union-${person_id}-`,
+      payloadIds: payloadNodeIds 
+    });
+
+    // 2. Process Nodes (People and Unions)
+    for (const node of nodes) {
       if (node.type === 'person') {
         const query = `
           MERGE (p:Person {person_id: $person_id})
@@ -118,7 +161,9 @@ export class CircleOfLifeService {
         const props = {
           name: node.data.name,
           gender: node.data.gender || 'male',
+          birth_date: node.data.birth_date || '',
           birth_year: node.data.birth_year,
+          death_date: node.data.death_date || null,
           death_year: node.data.death_year || null,
           memorial_id: node.data.memorial_id || '',
           visibility: node.data.visibility || 'private',
@@ -127,31 +172,33 @@ export class CircleOfLifeService {
           x: this.normalizeNumber(node.position.x),
           y: this.normalizeNumber(node.position.y)
         };
+        console.log(`[CircleOfLifeService] Saving Person: ${props.name} (ID: ${node.id})`);
         await this.graphService.runQuery(query, { person_id: String(node.id), props });
       } else if (node.type === 'union') {
         const query = `
-          MERGE (u:Union {union_id: $union_id}) 
-          SET u.x = $x, u.y = $y
+          MERGE (u:Union {union_id: $uid}) 
+          SET u.x = $ux, u.y = $uy
           RETURN u
         `;
         const params = { 
-          union_id: String(node.id), 
-          x: this.normalizeNumber(node.position.x), 
-          y: this.normalizeNumber(node.position.y) 
+          uid: String(node.id), 
+          ux: this.normalizeNumber(node.position.x), 
+          uy: this.normalizeNumber(node.position.y) 
         };
+        console.log(`[CircleOfLifeService] Saving Union: (ID: ${node.id})`);
         await this.graphService.runQuery(query, params);
       }
     }
 
-    // 2. Clear old relationships between these nodes to prevent duplicates/ghost lines
-    if (nodeIds.length > 0) {
+    // 3. Clear old relationships between these nodes to prevent duplicates/ghost lines
+    if (payloadNodeIds.length > 0) {
       const clearQuery = `
         MATCH (a)-[r:PARENT|SPOUSE|RELATION]->(b)
         WHERE (a.person_id IN $nodeIds OR a.union_id IN $nodeIds)
           AND (b.person_id IN $nodeIds OR b.union_id IN $nodeIds)
         DELETE r
       `;
-      await this.graphService.runQuery(clearQuery, { nodeIds });
+      await this.graphService.runQuery(clearQuery, { nodeIds: payloadNodeIds });
     }
 
     // 3. Process Relationships (Edges)
@@ -160,10 +207,11 @@ export class CircleOfLifeService {
         const label = edge.label || 'Parent';
         const type = label === 'Parent' ? 'PARENT' : label === 'Partner' ? 'SPOUSE' : 'RELATION';
         
+        // Fix: Use specific labels (Person or Union) to prevent Cartesian product and messy lines
         const query = `
           MATCH (a), (b)
-          WHERE (a.person_id = $source OR a.union_id = $source)
-            AND (b.person_id = $target OR b.union_id = $target)
+          WHERE ((a:Person AND a.person_id = $source) OR (a:Union AND a.union_id = $source))
+            AND ((b:Person AND b.person_id = $target) OR (b:Union AND b.union_id = $target))
           MERGE (a)-[r:${type}]->(b)
           SET r.id = $id,
               r.sourceHandle = $sourceHandle,
@@ -171,14 +219,17 @@ export class CircleOfLifeService {
               r.type = $edgeType
           RETURN r
         `;
-        await this.graphService.runQuery(query, { 
+
+        const edgeParams = { 
           id: String(edge.id), 
           source: String(edge.source), 
           target: String(edge.target),
           sourceHandle: edge.sourceHandle || '',
           targetHandle: edge.targetHandle || '',
           edgeType: edge.type || 'smoothstep'
-        });
+        };
+
+        await this.graphService.runQuery(query, edgeParams);
       }
     }
   }
