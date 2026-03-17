@@ -118,6 +118,7 @@ const FamilyTree = () => {
         ...node,
         data: {
           ...node.data,
+          personId, // For root node protection
           onEdit: handleEditNode,
           onConnect: handleConnectNode
         }

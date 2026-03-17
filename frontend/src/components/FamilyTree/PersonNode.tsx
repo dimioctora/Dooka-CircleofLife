@@ -71,13 +71,15 @@ const PersonNode = ({ id, data }: { id: string, data: any }) => {
             <Edit2 size={9} />
           </button>
         )}
-        <button 
-          className="delete-node-btn"
-          onClick={handleDelete}
-          title="Remove from tree"
-        >
-          <Trash2 size={9} />
-        </button>
+        {id !== data.personId && (
+          <button 
+            className="delete-node-btn"
+            onClick={handleDelete}
+            title="Remove from tree"
+          >
+            <Trash2 size={9} />
+          </button>
+        )}
       </div>
 
       <div className="node-content">
