@@ -29,26 +29,11 @@ const initialNodes = [
     id: '1',
     type: 'person',
     position: { x: 250, y: 0 },
-    data: { name: 'Parent Name', birth_year: 1950, death_year: 2020, memorial_id: 'm1' },
-  },
-  {
-    id: '2',
-    type: 'person',
-    position: { x: 100, y: 150 },
-    data: { name: 'Child Name (1)', birth_year: 1980, death_year: null },
-  },
-  {
-    id: '3',
-    type: 'person',
-    position: { x: 400, y: 150 },
-    data: { name: 'Child Name (2)', birth_year: 1982, death_year: null },
+    data: { name: 'Nama Anda', birth_year: 1950, death_year: null },
   },
 ];
 
-const initialEdges = [
-  { id: 'e1-2', source: '1', target: '2', label: 'Parent', sourceHandle: 'bottom-source', targetHandle: 'top-target' },
-  { id: 'e1-3', source: '1', target: '3', label: 'Parent', sourceHandle: 'bottom-source', targetHandle: 'top-target' },
-];
+const initialEdges: any[] = [];
 
 const FamilyTree = () => {
   const [nodes, setNodes] = useNodesState<any>([]);
